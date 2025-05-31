@@ -1,0 +1,98 @@
+name: Build SmartDNS Configuration Files
+# Code by Claude 4 Sonnect
+
+on:
+  workflow_dispatch:  # Manual trigger - 手动触发
+  schedule:
+    - cron: "0 2 * * *"  # Run daily at 2 AM UTC - 每天凌晨2点运行
+
+env:
+  SOURCE_REPO: felixonmars/dnsmasq-china-list
+  SOURCE_BRANCH: master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout current repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Check for source repository updates
+      id: check-update
+      run: |
+        # Get latest commit ID from source repository - 获取源仓库最新提交ID
+        LATEST_COMMIT=$(curl -s "https://api.github.com/repos/${{ env.SOURCE_REPO }}/commits/${{ env.SOURCE_BRANCH }}" | jq -r '.sha')
+        echo "Latest source commit: $LATEST_COMMIT"
+        
+        # Check if update is needed - 检查是否需要更新
+        if [ -f ".last_source_commit" ]; then
+          LAST_COMMIT=$(cat .last_source_commit)
+          echo "Last processed commit: $LAST_COMMIT"
+          
+          if [ "$LAST_COMMIT" = "$LATEST_COMMIT" ]; then
+            echo "need_update=false" >> $GITHUB_OUTPUT
+            echo "No updates needed - 无需更新"
+          else
+            echo "need_update=true" >> $GITHUB_OUTPUT
+            echo "Updates found - 发现更新"
+          fi
+        else
+          echo "need_update=true" >> $GITHUB_OUTPUT
+          echo "First run, proceeding with build - 首次运行，开始构建"
+        fi
+        
+        echo "latest_commit=$LATEST_COMMIT" >> $GITHUB_OUTPUT
+    
+    - name: Setup build environment
+      if: steps.check-update.outputs.need_update == 'true'
+      run: |
+        # Install required packages - 安装必需的软件包
+        sudo apt-get update -qq
+        sudo apt-get install -qq make
+    
+    - name: Clone and build
+      if: steps.check-update.outputs.need_update == 'true'
+      run: |
+        # Clone source repository - 克隆源仓库
+        git clone https://github.com/${{ env.SOURCE_REPO }}.git -b ${{ env.SOURCE_BRANCH }} --depth 1
+        
+        # Build SmartDNS configuration files - 构建SmartDNS配置文件
+        cd dnsmasq-china-list
+        make SERVER=domestic SMARTDNS_SPEEDTEST_MODE=tcp:80 smartdns-domain-rules
+        
+        # Copy generated files to repository root - 复制生成的文件到仓库根目录
+        cp accelerated-domains.china.domain.smartdns.conf ../
+        cp google.china.domain.smartdns.conf ../
+        cp apple.china.domain.smartdns.conf ../
+        
+        # Record processed commit ID for next comparison - 记录已处理的提交ID用于下次比较
+        cd ..
+        echo "${{ steps.check-update.outputs.latest_commit }}" > .last_source_commit
+    
+    - name: Commit and push if changed
+      if: steps.check-update.outputs.need_update == 'true'
+      run: |
+        # Configure git user - 配置git用户
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add .
+        
+        # Check for changes and commit if any - 检查变更并在有变更时提交
+        if ! git diff --staged --quiet; then
+          git commit -m "Update SmartDNS configuration files - $(date +'%Y-%m-%d')"
+          git push
+          echo "Files updated and pushed - 文件已更新并推送"
+        else
+          echo "No changes to commit - 无变更需要提交"
+        fi
+    
+    - name: Clean up old workflow runs
+      uses: Mattraks/delete-workflow-runs@v2
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        repository: ${{ github.repository }}
+        retain_days: 7
+        keep_minimum_runs: 5
