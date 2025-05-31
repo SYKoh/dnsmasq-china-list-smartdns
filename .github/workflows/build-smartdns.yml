@@ -1,5 +1,4 @@
 name: Build SmartDNS Configuration Files
-# Code by Claude 4 Sonnect
 
 on:
   workflow_dispatch:  # Manual trigger - 手动触发
@@ -68,8 +67,11 @@ jobs:
         cp google.china.domain.smartdns.conf ../
         cp apple.china.domain.smartdns.conf ../
         
-        # Record processed commit ID for next comparison - 记录已处理的提交ID用于下次比较
+        # Clean up cloned repository to avoid submodule issues - 清理克隆的仓库以避免submodule问题
         cd ..
+        rm -rf dnsmasq-china-list
+        
+        # Record processed commit ID for next comparison - 记录已处理的提交ID用于下次比较
         echo "${{ steps.check-update.outputs.latest_commit }}" > .last_source_commit
     
     - name: Commit and push if changed
